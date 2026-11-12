@@ -35,9 +35,14 @@ def get_detector():
     return _detector
 
 
+def open_video(path: str) -> cv2.VideoCapture:
+    """Mở video với số luồng giải mã giới hạn (mặc định OpenCV mở theo số nhân CPU, tốn RAM)."""
+    return cv2.VideoCapture(path, cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, CPU_THREADS])
+
+
 def get_duration(path: str) -> float:
     """Thời lượng video (giây), trả về 0 nếu không đọc được frame nào (file hỏng)."""
-    cap = cv2.VideoCapture(path)
+    cap = open_video(path)
     readable, _ = cap.read()
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -51,7 +56,7 @@ def detect_plates(path: str, on_progress: Callable[[float], None]) -> list[list[
     Frame bị bỏ qua để trống, fill_gaps() sẽ mượn box từ frame bên cạnh.
     """
     detector = get_detector()
-    cap = cv2.VideoCapture(path)
+    cap = open_video(path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     boxes = []
     while True:
@@ -103,46 +108,60 @@ def blur_box(frame, box: Box) -> None:
     frame[y1:y2, x1:x2] = cv2.GaussianBlur(roi, (0, 0), sigma)
 
 
-def write_blurred(path: str, boxes: list[list[Box]], out_path: str) -> None:
+def write_blurred(path: str, boxes: list[list[Box]], out_path: str, on_progress: Callable[[float], None]) -> None:
     """Lượt 2: đọc lại video, làm mờ các box rồi ghi ra file (chưa có âm thanh)."""
-    cap = cv2.VideoCapture(path)
+    cap = open_video(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
-    for frame_boxes in boxes:
+    for i, frame_boxes in enumerate(boxes, 1):
         ok, frame = cap.read()
         if not ok:
             break
         for box in frame_boxes:
             blur_box(frame, box)
         writer.write(frame)
+        on_progress(i / len(boxes))
     cap.release()
     writer.release()
 
 
-def finalize(blurred: str, original: str, out_path: str) -> None:
+def finalize(blurred: str, original: str, out_path: str, total_frames: int, on_progress: Callable[[float], None]) -> None:
     """Dùng ffmpeg: đổi sang H.264 (trình duyệt xem được) và lấy lại âm thanh gốc."""
-    subprocess.run(
+    proc = subprocess.Popen(
         [
             "ffmpeg", "-y", "-v", "error",
-            "-i", blurred, "-i", original,
+            "-progress", "pipe:1", "-nostats",  # in tiến độ dạng "frame=123" ra stdout
+            # -threads đặt trước -i: giới hạn cả luồng giải mã, không chỉ luồng mã hoá
+            "-threads", str(CPU_THREADS), "-i", blurred,
+            "-threads", str(CPU_THREADS), "-i", original,
             "-map", "0:v", "-map", "1:a?",  # hình từ file đã che, tiếng từ file gốc (nếu có)
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
             "-threads", str(CPU_THREADS),  # mỗi luồng tốn thêm RAM, máy chủ yếu nên để 1
-            "-c:a", "aac", "-movflags", "+faststart", "-shortest",
+            "-c:a", "aac", "-movflags", "+faststart",  # không dùng -shortest: tốn thêm ~110MB RAM
             out_path,
         ],
-        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
     )
+    for line in proc.stdout:
+        if line.startswith("frame="):
+            on_progress(min(1.0, int(line.split("=")[1]) / total_frames))
+    if proc.wait() != 0:
+        raise subprocess.CalledProcessError(proc.returncode, proc.args)
 
 
 def process_video(path: str, out_path: str, on_progress: Callable[[float], None] = lambda p: None) -> int:
-    """Toàn bộ quy trình. Trả về số frame có che biển số."""
-    boxes = fill_gaps(detect_plates(path, lambda p: on_progress(p * 0.9)))
+    """Toàn bộ quy trình. Trả về số frame có che biển số.
+
+    Tiến độ chia theo thời gian đo được trên CPU yếu:
+    nhận diện 0-40%, làm mờ 40-70%, ffmpeg 70-100%.
+    """
+    boxes = fill_gaps(detect_plates(path, lambda p: on_progress(p * 0.4)))
     with tempfile.TemporaryDirectory() as tmp:
         blurred = str(Path(tmp) / "blurred.mp4")
-        write_blurred(path, boxes, blurred)
-        finalize(blurred, path, out_path)
+        write_blurred(path, boxes, blurred, lambda p: on_progress(0.4 + p * 0.3))
+        finalize(blurred, path, out_path, len(boxes), lambda p: on_progress(0.7 + p * 0.3))
     on_progress(1.0)
     return sum(1 for b in boxes if b)
 
