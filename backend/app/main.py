@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Plate Blur API", lifespan=lifespan)
+app = FastAPI(title="Plate Blur API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
