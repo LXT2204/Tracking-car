@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { createJob } from './api'
+import { useEffect, useState } from 'react'
+import { createJob, wakeServer } from './api'
 import JobView from './components/JobView'
 import VideoPicker from './components/VideoPicker'
 
@@ -9,6 +9,10 @@ export default function App() {
   const [jobId, setJobId] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    wakeServer()
+  }, [])
 
   function handleFileChange(newFile) {
     if (video) URL.revokeObjectURL(video.url) // giải phóng bộ nhớ của file cũ

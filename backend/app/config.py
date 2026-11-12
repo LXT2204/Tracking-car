@@ -7,10 +7,6 @@ import os
 from pathlib import Path
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
-# Render/Postgres cho URL dạng postgres://..., SQLAlchemy cần ghi rõ driver psycopg
-for prefix in ("postgres://", "postgresql://"):
-    if DATABASE_URL.startswith(prefix):
-        DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.removeprefix(prefix)
 STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "./storage"))
 MAX_SECONDS = float(os.getenv("MAX_SECONDS", "20"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))

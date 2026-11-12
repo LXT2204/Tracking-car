@@ -1,0 +1,21 @@
+# Render Blueprint: mô tả hạ tầng bằng file. Trên render.com chọn New -> Blueprint -> repo này.
+# Không có DATABASE_URL nên backend dùng SQLite trong container (job chỉ cần lưu tạm).
+
+services:
+  - type: web
+    name: plate-blur-api
+    runtime: docker
+    plan: free
+    region: singapore # gần Việt Nam nhất, không đổi được sau khi tạo
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health # Render gọi để biết server còn sống
+    envVars:
+      # CPU gói Free rất yếu (0.1 CPU): model nhỏ + chạy AI cách 1 frame
+      - key: PLATE_MODEL
+        value: yolo-v9-t-384-license-plate-end2end
+      - key: DETECT_EVERY
+        value: "2"
+      # Địa chỉ trang Vercel, nhập trên dashboard sau khi deploy frontend
+      - key: CORS_ORIGINS
+        sync: false
