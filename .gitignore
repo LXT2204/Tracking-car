@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.db
+
+# Node
+node_modules/
+dist/
+
+# Bí mật & dữ liệu tạm
+.env
+backend/storage/
+samples/
+
+CLAUDE.md

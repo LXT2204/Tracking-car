@@ -1,0 +1,4 @@
+fastapi[standard]
+open-image-models[onnx]
+opencv-python-headless
+sqlmodel

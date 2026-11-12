@@ -1,0 +1,142 @@
+"""Che biển số xe trong video.
+
+Chạy thử từ thư mục backend:
+    python -m app.blur ../samples/input.mp4 ../samples/output.mp4
+"""
+
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Callable
+
+import cv2
+from open_image_models import create_detector
+
+Box = tuple[int, int, int, int]  # (x1, y1, x2, y2)
+
+MODEL_NAME = "yolo-v9-t-640-license-plate-end2end"
+HOLD_FRAMES = 10   # giữ box tối đa 10 frame (~0.3s) khi model "lỡ" mất biển số
+PADDING = 0.25     # nới rộng box 25% để che kín cả viền biển
+
+_detector = None
+
+
+def get_detector():
+    """Nạp model 1 lần duy nhất rồi dùng lại (nạp model tốn ~1 giây)."""
+    global _detector
+    if _detector is None:
+        _detector = create_detector(MODEL_NAME)
+    return _detector
+
+
+def get_duration(path: str) -> float:
+    """Thời lượng video (giây), trả về 0 nếu không đọc được frame nào (file hỏng)."""
+    cap = cv2.VideoCapture(path)
+    readable, _ = cap.read()
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return frames / fps if readable else 0.0
+
+
+def detect_plates(path: str, on_progress: Callable[[float], None]) -> list[list[Box]]:
+    """Lượt 1: chạy model trên từng frame, trả về danh sách box của mỗi frame."""
+    detector = get_detector()
+    cap = cv2.VideoCapture(path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    boxes = []
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        found = detector.predict(frame)
+        boxes.append([(d.bounding_box.x1, d.bounding_box.y1, d.bounding_box.x2, d.bounding_box.y2) for d in found])
+        on_progress(len(boxes) / total)
+    cap.release()
+    return boxes
+
+
+def fill_gaps(boxes: list[list[Box]]) -> list[list[Box]]:
+    """Frame nào model bỏ sót thì mượn box của frame gần nhất trước và sau nó.
+
+    Vì đã có kết quả của cả video nên ta "nhìn được tương lai",
+    giúp vùng che không bị nhấp nháy.
+    """
+    detected = [i for i, b in enumerate(boxes) if b]
+    filled = []
+    for i, frame_boxes in enumerate(boxes):
+        if frame_boxes:
+            filled.append(frame_boxes)
+            continue
+        prev = max((j for j in detected if i - HOLD_FRAMES <= j < i), default=None)
+        nxt = min((j for j in detected if i < j <= i + HOLD_FRAMES), default=None)
+        borrowed = (boxes[prev] if prev is not None else []) + (boxes[nxt] if nxt is not None else [])
+        filled.append(borrowed)
+    return filled
+
+
+def blur_box(frame, box: Box) -> None:
+    """Làm mờ một vùng trên frame (sửa trực tiếp frame)."""
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = box
+    pad_x, pad_y = int((x2 - x1) * PADDING), int((y2 - y1) * PADDING)
+    x1, y1 = max(0, x1 - pad_x), max(0, y1 - pad_y)
+    x2, y2 = min(w, x2 + pad_x), min(h, y2 + pad_y)
+    if x2 <= x1 or y2 <= y1:
+        return
+    roi = frame[y1:y2, x1:x2]
+    sigma = max(x2 - x1, y2 - y1) / 4
+    frame[y1:y2, x1:x2] = cv2.GaussianBlur(roi, (0, 0), sigma)
+
+
+def write_blurred(path: str, boxes: list[list[Box]], out_path: str) -> None:
+    """Lượt 2: đọc lại video, làm mờ các box rồi ghi ra file (chưa có âm thanh)."""
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+    for frame_boxes in boxes:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        for box in frame_boxes:
+            blur_box(frame, box)
+        writer.write(frame)
+    cap.release()
+    writer.release()
+
+
+def finalize(blurred: str, original: str, out_path: str) -> None:
+    """Dùng ffmpeg: đổi sang H.264 (trình duyệt xem được) và lấy lại âm thanh gốc."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error",
+            "-i", blurred, "-i", original,
+            "-map", "0:v", "-map", "1:a?",  # hình từ file đã che, tiếng từ file gốc (nếu có)
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-movflags", "+faststart", "-shortest",
+            out_path,
+        ],
+        check=True,
+    )
+
+
+def process_video(path: str, out_path: str, on_progress: Callable[[float], None] = lambda p: None) -> int:
+    """Toàn bộ quy trình. Trả về số frame có che biển số."""
+    boxes = fill_gaps(detect_plates(path, lambda p: on_progress(p * 0.9)))
+    with tempfile.TemporaryDirectory() as tmp:
+        blurred = str(Path(tmp) / "blurred.mp4")
+        write_blurred(path, boxes, blurred)
+        finalize(blurred, path, out_path)
+    on_progress(1.0)
+    return sum(1 for b in boxes if b)
+
+
+if __name__ == "__main__":
+    src, dst = sys.argv[1], sys.argv[2]
+    print(f"Video dài {get_duration(src):.1f}s")
+    start = time.perf_counter()
+    count = process_video(src, dst, lambda p: print(f"\r{p:.0%}", end="", flush=True))
+    print(f"\nXong trong {time.perf_counter() - start:.1f}s, che biển số ở {count} frame -> {dst}")
