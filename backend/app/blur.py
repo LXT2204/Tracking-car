@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Callable
 
 import cv2
+import onnxruntime as ort
 from open_image_models import create_detector
+
+from app.config import CPU_THREADS, DETECT_EVERY, PLATE_MODEL
 
 Box = tuple[int, int, int, int]  # (x1, y1, x2, y2)
 
-MODEL_NAME = "yolo-v9-t-640-license-plate-end2end"
 HOLD_FRAMES = 10   # giữ box tối đa 10 frame (~0.3s) khi model "lỡ" mất biển số
 PADDING = 0.25     # nới rộng box 25% để che kín cả viền biển
 
@@ -27,7 +29,9 @@ def get_detector():
     """Nạp model 1 lần duy nhất rồi dùng lại (nạp model tốn ~1 giây)."""
     global _detector
     if _detector is None:
-        _detector = create_detector(MODEL_NAME)
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = CPU_THREADS
+        _detector = create_detector(PLATE_MODEL, sess_options=options)
     return _detector
 
 
@@ -42,12 +46,20 @@ def get_duration(path: str) -> float:
 
 
 def detect_plates(path: str, on_progress: Callable[[float], None]) -> list[list[Box]]:
-    """Lượt 1: chạy model trên từng frame, trả về danh sách box của mỗi frame."""
+    """Lượt 1: chạy model trên mỗi DETECT_EVERY frame, trả về danh sách box của mỗi frame.
+
+    Frame bị bỏ qua để trống, fill_gaps() sẽ mượn box từ frame bên cạnh.
+    """
     detector = get_detector()
     cap = cv2.VideoCapture(path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     boxes = []
     while True:
+        if len(boxes) % DETECT_EVERY:
+            if not cap.grab():  # grab() chỉ bỏ qua frame, nhanh hơn read()
+                break
+            boxes.append([])
+            continue
         ok, frame = cap.read()
         if not ok:
             break
@@ -116,6 +128,7 @@ def finalize(blurred: str, original: str, out_path: str) -> None:
             "-i", blurred, "-i", original,
             "-map", "0:v", "-map", "1:a?",  # hình từ file đã che, tiếng từ file gốc (nếu có)
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+            "-threads", str(CPU_THREADS),  # mỗi luồng tốn thêm RAM, máy chủ yếu nên để 1
             "-c:a", "aac", "-movflags", "+faststart", "-shortest",
             out_path,
         ],

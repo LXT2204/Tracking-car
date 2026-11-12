@@ -1,0 +1,44 @@
+# Chạy cả app (giống môi trường live) bằng 1 lệnh: docker compose up --build
+# Mở http://localhost:8080
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 2s
+      retries: 15
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/app # "db" là tên service ở trên
+      CORS_ORIGINS: http://localhost:8080
+      STORAGE_DIR: /data
+    volumes:
+      - storage:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy # chờ Postgres sẵn sàng mới chạy backend
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000 # trình duyệt gọi API qua cổng đã mở ra máy
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  storage:
