@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { createJob, wakeServer } from './api'
+import About from './components/About'
+import Donate from './components/Donate'
+import Footer from './components/Footer'
+import Hero from './components/Hero'
+import HowItWorks from './components/HowItWorks'
 import JobView from './components/JobView'
+import Navbar from './components/Navbar'
 import VideoPicker from './components/VideoPicker'
 
 export default function App() {
@@ -41,26 +47,38 @@ export default function App() {
   }
 
   return (
-    <main className="container">
-      <header>
-        <h1>Che biển số xe</h1>
-        <p className="muted">Upload video ngắn, hệ thống tự tìm và làm mờ biển số.</p>
-      </header>
+    <>
+      {/* Nền: lưới + 2 quầng sáng neon, nằm cố định phía sau mọi thứ */}
+      <div className="bg" aria-hidden="true">
+        <div className="bg-grid" />
+        <div className="bg-glow cyan" />
+        <div className="bg-glow violet" />
+      </div>
 
-      {jobId ? (
-        // key={jobId}: đổi job thì React tạo JobView mới, trạng thái cũ bị xoá sạch
-        <JobView key={jobId} jobId={jobId} originalUrl={video.url} onReset={reset} />
-      ) : (
-        <VideoPicker
-          file={video?.file}
-          previewUrl={video?.url}
-          onChange={handleFileChange}
-          onUpload={handleUpload}
-          uploading={uploading}
-        />
-      )}
+      <Navbar />
 
-      {error && <p className="error">{error}</p>}
-    </main>
+      <main>
+        <Hero>
+          {jobId ? (
+            // key={jobId}: đổi job thì React tạo JobView mới, trạng thái cũ bị xoá sạch
+            <JobView key={jobId} jobId={jobId} originalUrl={video.url} onReset={reset} />
+          ) : (
+            <VideoPicker
+              file={video?.file}
+              previewUrl={video?.url}
+              onChange={handleFileChange}
+              onUpload={handleUpload}
+              uploading={uploading}
+            />
+          )}
+          {error && <p className="error">{error}</p>}
+        </Hero>
+        <HowItWorks />
+        <About />
+        <Donate />
+      </main>
+
+      <Footer />
+    </>
   )
 }
