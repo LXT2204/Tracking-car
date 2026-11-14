@@ -190,6 +190,30 @@ Mỗi lần `git push` lên nhánh `main`, Vercel và Render tự build và depl
 - Giao diện một trang: công cụ, cách hoạt động, giới thiệu, donate.
 - Deploy tự động: backend trên Render, frontend trên Vercel.
 
+## Giấy phép & ghi công
+
+Mã nguồn của project phát hành theo giấy phép [MIT](LICENSE): bạn được dùng, sửa và phân phối lại, kể cả cho mục đích thương mại, miễn là giữ lại thông báo bản quyền.
+
+Giấy phép MIT chỉ áp dụng cho code trong repo này. Các thành phần bên thứ ba giữ giấy phép riêng:
+
+| Thành phần | Giấy phép | Ghi chú |
+|---|---|---|
+| Model nhận diện biển số `yolo-v9-*-license-plate-end2end` | MIT | Do [open-image-models](https://github.com/ankandrew/open-image-models) huấn luyện và phát hành. Tải về lúc build, không nằm trong repo |
+| FFmpeg | GPL v3 (bản của Debian, có libx264) | Cài bằng `apt` trong Docker image, không nằm trong repo. Nếu phân phối lại Docker image, cần tuân thủ giấy phép GPL của FFmpeg |
+| React, Vite, FastAPI, SQLModel, onnxruntime | MIT | |
+| OpenCV | Apache 2.0 | |
+
+Model dựa trên kiến trúc YOLOv9:
+
+```
+@article{wang2024yolov9,
+  title={{YOLOv9}: Learning What You Want to Learn Using Programmable Gradient Information},
+  author={Wang, Chien-Yao and Liao, Hong-Yuan Mark},
+  journal={arXiv preprint arXiv:2402.13616},
+  year={2024}
+}
+```
+
 ## Tác giả
 
 **Lê Xuân Thạch**: [GitHub](https://github.com/LXT2204) · [LinkedIn](https://www.linkedin.com/in/thachlexuan/) · xuanthach.contact@gmail.com
